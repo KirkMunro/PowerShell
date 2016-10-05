@@ -2990,6 +2990,12 @@ namespace System.Management.Automation.Language
                 sb.Append(c);
                 ScanExponent(sb, ref signIndex, ref notNumber);
             }
+            else if (!c.ForceStartNewToken() && !c.ForceStartNewTokenAfterNumber() && !c.IsTypeSuffix() && !c.IsMultiplierStart())
+            {
+                // When looking ahead at characters, it is helpful to callers if we identify when
+                // something is known as not a number as soon as possible.
+                notNumber = true;
+            }
         }
 
         private static bool TryGetNumberValue(string strNum, bool hex, bool real, char suffix, long multiplier, out object result)
@@ -3180,6 +3186,7 @@ namespace System.Management.Automation.Language
 
             bool notNumber = false;
             int signIndex = -1;
+            int lengthBeforeDot = -1;
             char c;
             var sb = GetStringBuilder();
 
@@ -3225,6 +3232,7 @@ namespace System.Management.Automation.Language
                             }
                             else
                             {
+                                lengthBeforeDot = sb.Length;
                                 sb.Append(c);
                                 real = true;
                                 ScanNumberAfterDot(sb, ref signIndex, ref notNumber);
@@ -3247,6 +3255,10 @@ namespace System.Management.Automation.Language
                 SkipChar();
                 suffix = c;
                 c = PeekChar();
+                if (!c.ForceStartNewToken() && !c.ForceStartNewTokenAfterNumber() && !c.IsMultiplierStart())
+                {
+                    notNumber = true;
+                }
             }
 
             if (c.IsMultiplierStart())
@@ -3269,6 +3281,26 @@ namespace System.Management.Automation.Language
                 {
                     notNumber = true;
                 }
+            }
+
+            if (notNumber && lengthBeforeDot != -1)
+            {
+                // If we have a dot followed by anything that makes it NaN, then unget
+                // back to the dot so the value following the dot is treated as a member.
+                while ((c = PeekChar()) != '.')
+                {
+                    UngetChar();
+                }
+                sb.Length = lengthBeforeDot;
+
+                // Once we've rewound the char marker, we need to reset our flags since we
+                // are dealing with an integer that does not have a suffix or a multiplier,
+                // but that does have a member being invoked.
+                real = false;
+                suffix = '\0';
+                multiplier = 1;
+                notNumber = false;
+                signIndex = -1;
             }
 
             if (!c.ForceStartNewToken())
